@@ -20,12 +20,12 @@ USE WOKWI HOBBY +
 
 
 # MQTT Server Parameters
-MQTT_CLIENT_ID = " "
+MQTT_CLIENT_ID = "esp32-futurekawa-dht"
 MQTT_BROKER    = "host.wokwi.internal" 
 MQTT_PORT = 1883
 MQTT_USER      = " "
 MQTT_PASSWORD  = " "
-MQTT_TOPIC     = " "
+MQTT_TOPIC     = "futurekawa_dht"
 
 sensor = dht.DHT22(Pin(15))
 
@@ -46,6 +46,7 @@ print("Connected!")
 
 
 while True:
+  time.sleep(30)
   print("Measuring weather conditions... ", end="")
   try:
     sensor.measure() 
@@ -56,7 +57,6 @@ while True:
   except Exception as e:
     print("Erreur :", e)
     
-  time.sleep(30)
   print("Updated!")
   print("Reporting to MQTT topic {}: {}".format(MQTT_TOPIC, message))
   client.publish(MQTT_TOPIC, message)
