@@ -1,8 +1,32 @@
-# BACK
-cd backend
-venv\Scripts\activate
-uvicorn main:app --reload
+==========================================================
+ FutureKawa — Démarrage rapide
+ (guide complet : voir README.md)
+==========================================================
 
-# FRONT
-cd frontend
-npm run dev
+PRÉREQUIS : Docker + Docker Compose, Node.js >= 18
+
+1) STACK BACKEND + IoT (base, broker MQTT, API pays, API centrale)
+   docker compose up -d postgres mosquitto brazil-api central-api
+
+   -> API pays    : http://localhost:8000/docs
+   -> API centrale: http://localhost:8001/docs
+
+2) FRONTEND (mode développement)
+   cd frontend
+   npm install
+   npm run dev
+   -> http://localhost:5173
+
+3) (OPTIONNEL) SIMULATEUR DE CAPTEUR IoT
+   cd backend-brazil
+   pip install -r requirements.txt
+   python mqtt_simulator.py              # données normales
+   python mqtt_simulator.py --anomalies  # génère des alertes
+
+ARRÊT
+   docker compose down        # arrêter
+   docker compose down -v      # + effacer les données
+
+NOTE : le service "frontend" du docker-compose n'est pas encore
+conteneurisé (Dockerfile à fournir) -> on lance le front via npm
+(étape 2). Voir README.md > "État d'avancement & limitations".
