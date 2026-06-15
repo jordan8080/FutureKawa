@@ -1,0 +1,88 @@
+services:
+
+  # ---------- Base de données ----------
+  postgres:
+    image: postgres:15
+    container_name: fk-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: futurkawa_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d futurkawa_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - fk-net
+
+  # ---------- Broker MQTT (local Brésil) ----------
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: fk-mosquitto
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf
+    networks:
+      - fk-net
+
+  # ---------- Backend Brésil (pays / local) ----------
+  brazil-api:
+    build: ./backend-brazil
+    container_name: fk-brazil-api
+    environment:
+      DATABASE_URL: postgresql://postgres:password@postgres:5432/futurkawa_db
+      MQTT_BROKER: mosquitto
+      MQTT_TOPIC: futurekawa/brazil
+      # Email alertes — vide = mode démo (console). Voir backend-brazil/.env.example
+      SMTP_HOST: ""
+      SMTP_PORT: "587"
+      SMTP_USER: ""
+      SMTP_PASSWORD: ""
+      ALERT_EMAIL_TO: "responsable.brazil@futurekawa.com"
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    networks:
+      - fk-net
+
+  # ---------- Backend Central (siège) ----------
+  central-api:
+    build: ./backend-central
+    container_name: fk-central-api
+    environment:
+      # URL interne du backend pays (réseau Docker)
+      BRAZIL_API_URL: http://brazil-api:8000
+    ports:
+      - "8001:8001"
+    depends_on:
+      - brazil-api
+    networks:
+      - fk-net
+
+  # ---------- Frontend (dashboard web) ----------
+  frontend:
+    build: ./frontend
+    container_name: fk-frontend
+    ports:
+      - "8090:80"
+    depends_on:
+      - central-api
+    networks:
+      - fk-net
+
+volumes:
+  pgdata:
+
+networks:
+  fk-net:
+    driver: bridge
