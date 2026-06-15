@@ -12,12 +12,9 @@ by artefatos
 https://wokwi.com/projects/395442253921303553
 
 
-
 USE WOKWI HOBBY + 
 
-
 """
-
 
 # MQTT Server Parameters
 MQTT_CLIENT_ID = "esp32-futurekawa-dht"
@@ -61,7 +58,6 @@ while True:
   print("Reporting to MQTT topic {}: {}".format(MQTT_TOPIC, message))
   client.publish(MQTT_TOPIC, message)
     
-  
- 
+
 
 
