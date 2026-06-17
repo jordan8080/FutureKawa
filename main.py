@@ -18,10 +18,10 @@ USE WOKWI HOBBY +
 
 # MQTT Server Parameters
 MQTT_CLIENT_ID = "esp32-futurekawa-dht"
-MQTT_BROKER    = "host.wokwi.internal" 
+MQTT_BROKER    = "host.docker.internal" 
 MQTT_PORT = 1883
-MQTT_USER      = " "
-MQTT_PASSWORD  = " "
+MQTT_USER      = "fk_mqtt"
+MQTT_PASSWORD  = "futurekawa"
 MQTT_TOPIC     = "futurekawa_dht"
 
 sensor = dht.DHT22(Pin(15))
