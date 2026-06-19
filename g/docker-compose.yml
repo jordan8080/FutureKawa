@@ -1,0 +1,177 @@
+name: futurekawa
+
+services:
+  # ─── Infrastructure ─────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: futurekawa
+      POSTGRES_PASSWORD: futurekawa
+      POSTGRES_DB: futurekawa
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U futurekawa"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [futurekawa]
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    ports:
+      - "1883:1883"
+    networks: [futurekawa]
+
+  # ─── Backends pays (une seule image, 3 instances) ───────────────────────────
+  backend-brazil:
+    build: ./backend/backend-country
+    environment:
+      COUNTRY: brazil
+      DATABASE_URL: postgresql+psycopg2://futurekawa:futurekawa@postgres:5432/futurekawa_brazil
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-alertes@futurekawa.com}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+    depends_on:
+      postgres: { condition: service_healthy }
+      mosquitto: { condition: service_started }
+    ports:
+      - "8011:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [futurekawa]
+
+  backend-ecuador:
+    build: ./backend/backend-country
+    environment:
+      COUNTRY: ecuador
+      DATABASE_URL: postgresql+psycopg2://futurekawa:futurekawa@postgres:5432/futurekawa_ecuador
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-alertes@futurekawa.com}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+    depends_on:
+      postgres: { condition: service_healthy }
+      mosquitto: { condition: service_started }
+    ports:
+      - "8012:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [futurekawa]
+
+  backend-colombia:
+    build: ./backend/backend-country
+    environment:
+      COUNTRY: colombia
+      DATABASE_URL: postgresql+psycopg2://futurekawa:futurekawa@postgres:5432/futurekawa_colombia
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-alertes@futurekawa.com}
+      SMTP_USE_TLS: ${SMTP_USE_TLS:-true}
+    depends_on:
+      postgres: { condition: service_healthy }
+      mosquitto: { condition: service_started }
+    ports:
+      - "8013:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [futurekawa]
+
+  # ─── Backend central ────────────────────────────────────────────────────────
+  central:
+    build: ./backend/backend-central
+    environment:
+      BRAZIL_URL: http://backend-brazil:8000
+      ECUADOR_URL: http://backend-ecuador:8000
+      COLOMBIA_URL: http://backend-colombia:8000
+    depends_on:
+      backend-brazil: { condition: service_healthy }
+      backend-ecuador: { condition: service_healthy }
+      backend-colombia: { condition: service_healthy }
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/api/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [futurekawa]
+
+  # ─── Simulateur IoT ─────────────────────────────────────────────────────────
+  iot-simulator:
+    build: ./iot-simulator
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      SIM_MODE: ${SIM_MODE:-normal}
+      SIM_INTERVAL: ${SIM_INTERVAL:-10}
+    depends_on:
+      mosquitto: { condition: service_started }
+      backend-brazil: { condition: service_healthy }
+    networks: [futurekawa]
+
+  # ─── Node-RED (alerting parallèle, indépendant du backend) ──────────────────
+  node-red:
+    build: ./node-red
+    environment:
+      MQTT_HOST: mosquitto
+      MQTT_PORT: 1883
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:-alertes@futurekawa.com}
+      SMTP_TO: ${SMTP_TO:-}
+      TZ: Europe/Paris
+    depends_on:
+      mosquitto: { condition: service_started }
+    ports:
+      - "1880:1880"
+    volumes:
+      - nodered_data:/data
+    networks: [futurekawa]
+
+  # ─── Frontend (build Vite + nginx) ──────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ${FRONTEND_ORIGIN:-http://localhost:8082}
+    depends_on:
+      central: { condition: service_healthy }
+    ports:
+      - "8082:80"
+    networks: [futurekawa]
+
+volumes:
+  pgdata:
+  nodered_data:
+
+networks:
+  futurekawa:
+    driver: bridge
