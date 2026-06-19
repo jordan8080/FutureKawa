@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { Card } from '../components/ui/Card'
 import { LotsTable } from '../components/lots/LotsTable'
 import { ConditionGauge } from '../components/ui/ConditionGauge'
 import { StatusBadge } from '../components/ui/Badge'
+import { Button } from '../components/ui/Button'
 import { PageLoader } from '../components/ui/LoadingSpinner'
+import { NewLotForm } from '../components/forms/NewLotForm'
+import { NewWarehouseForm } from '../components/forms/NewWarehouseForm'
 import { lotsApi, warehousesApi } from '../api'
 import { COUNTRIES_CONFIG } from '../data/mockData'
 import { getWarehouseStatus } from '../utils/statusUtils'
@@ -27,17 +30,49 @@ export function CountryPage() {
   const [warehouses, setWarehouses] = useState([])
   const [selectedWarehouse, setSelectedWarehouse] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [showLotForm, setShowLotForm] = useState(false)
+  const [showWarehouseForm, setShowWarehouseForm] = useState(false)
+  const [actionError, setActionError] = useState('')
 
-  useEffect(() => {
-    if (!country) return
-    setLoading(true)
-    Promise.all([lotsApi.getByCountry(countryId), warehousesApi.getByCountry(countryId)])
+  const refetch = useCallback(() => {
+    return Promise.all([lotsApi.getByCountry(countryId), warehousesApi.getByCountry(countryId)])
       .then(([lotsData, warehousesData]) => {
         setLots(lotsData)
         setWarehouses(warehousesData)
       })
-      .finally(() => setLoading(false))
+      .catch(() => {})
   }, [countryId])
+
+  useEffect(() => {
+    if (!country) return
+    setLoading(true)
+    refetch().finally(() => setLoading(false))
+    const id = setInterval(refetch, 8000) // live + rafraîchit après CRUD
+    return () => clearInterval(id)
+  }, [countryId, country, refetch])
+
+  const handleCreateLot = async (data) => {
+    setActionError('')
+    await lotsApi.create({ ...data, country: countryId })
+    setShowLotForm(false)
+    await refetch()
+  }
+  const handleDeleteLot = async (lotId) => {
+    if (!window.confirm(`Supprimer le lot ${lotId} ?`)) return
+    setActionError('')
+    try { await lotsApi.remove(lotId); await refetch() } catch (e) { setActionError(e.message) }
+  }
+  const handleCreateWarehouse = async (data) => {
+    setActionError('')
+    await warehousesApi.create({ ...data, country: countryId })
+    setShowWarehouseForm(false)
+    await refetch()
+  }
+  const handleDeleteWarehouse = async (id) => {
+    if (!window.confirm('Supprimer cet entrepôt ?')) return
+    setActionError('')
+    try { await warehousesApi.remove(id); await refetch() } catch (e) { setActionError(e.message) }
+  }
 
   if (!country) {
     return (
@@ -111,7 +146,16 @@ export function CountryPage() {
 
       {/* Entrepôts + conditions */}
       <div>
-        <h2 className="text-base font-semibold text-white mb-3">Conditions actuelles par entrepôt</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-semibold text-white">Conditions actuelles par entrepôt</h2>
+          <Button size="sm" variant="secondary" onClick={() => setShowWarehouseForm(s => !s)}>
+            {showWarehouseForm ? 'Fermer' : '+ Entrepôt'}
+          </Button>
+        </div>
+        {showWarehouseForm && (
+          <NewWarehouseForm onSubmit={handleCreateWarehouse} onCancel={() => setShowWarehouseForm(false)} />
+        )}
+        {actionError && <p className="text-xs text-red-400 mb-3">{actionError}</p>}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {warehouses.map(w => {
             const status = getWarehouseStatus(w)
@@ -127,7 +171,14 @@ export function CountryPage() {
                     <h3 className="text-sm font-semibold text-white">{w.name}</h3>
                     <p className="text-xs text-gray-500 mt-0.5">{w.exploitation} · {w.location}</p>
                   </div>
-                  <StatusBadge status={status} />
+                  <div className="flex items-start gap-2">
+                    <StatusBadge status={status} />
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handleDeleteWarehouse(w.id) }}
+                      className="text-gray-600 hover:text-red-400 transition-colors text-sm leading-none mt-0.5"
+                      title="Supprimer l'entrepôt"
+                    >✕</button>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <ConditionGauge type="temp" value={w.currentTemp} country={countryId} />
@@ -143,9 +194,14 @@ export function CountryPage() {
       {/* Lots section */}
       <div className="bg-gray-900 border border-gray-800 rounded-xl">
         <div className="px-5 py-4 border-b border-gray-800 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h2 className="text-base font-semibold text-white">Lots stockés</h2>
-            <p className="text-xs text-gray-500 mt-0.5">Triés par date de stockage (FIFO — les plus anciens en premier)</p>
+          <div className="flex items-center gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-white">Lots stockés</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Triés par date de stockage (FIFO — les plus anciens en premier)</p>
+            </div>
+            <Button size="sm" variant="secondary" onClick={() => setShowLotForm(s => !s)}>
+              {showLotForm ? 'Fermer' : '+ Lot'}
+            </Button>
           </div>
 
           {/* Filtres */}
@@ -169,7 +225,17 @@ export function CountryPage() {
           </div>
         </div>
 
-        <LotsTable lots={filteredLots} />
+        {showLotForm && warehouses.length > 0 && (
+          <div className="px-5 pt-4">
+            <NewLotForm
+              warehouses={warehouses}
+              onSubmit={handleCreateLot}
+              onCancel={() => setShowLotForm(false)}
+            />
+          </div>
+        )}
+
+        <LotsTable lots={filteredLots} onDelete={handleDeleteLot} />
       </div>
     </div>
   )

@@ -19,4 +19,24 @@ export const warehousesApi = {
     if (USE_MOCK) { await delay(150); return WAREHOUSES.find(w => w.id === id) ?? null }
     return apiRequest(`/api/warehouses/${id}`)
   },
+
+  create: async (data) => {
+    if (USE_MOCK) {
+      await delay(500)
+      const w = { ...data, id: `w-new-${Date.now()}`, currentTemp: 25, currentHumidity: 60 }
+      WAREHOUSES.push(w)
+      return w
+    }
+    return apiRequest('/api/warehouses', { method: 'POST', body: data })
+  },
+
+  remove: async (id) => {
+    if (USE_MOCK) {
+      await delay(400)
+      const i = WAREHOUSES.findIndex(w => w.id === id)
+      if (i >= 0) WAREHOUSES.splice(i, 1)
+      return { ok: true, id }
+    }
+    return apiRequest(`/api/warehouses/${id}`, { method: 'DELETE' })
+  },
 }

@@ -51,4 +51,14 @@ export const lotsApi = {
     }
     return apiRequest(`/api/lots/${lotId}/status`, { method: 'PATCH', body: { status } })
   },
+
+  remove: async (lotId) => {
+    if (USE_MOCK) {
+      await delay(400)
+      const i = LOTS.findIndex(l => l.id === lotId)
+      if (i >= 0) LOTS.splice(i, 1)
+      return { ok: true, id: lotId }
+    }
+    return apiRequest(`/api/lots/${lotId}`, { method: 'DELETE' })
+  },
 }

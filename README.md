@@ -1,281 +1,195 @@
-# ☕ FutureKawa — Suivi des stocks & conditions de stockage du café vert
+# FutureKawa — Backend distribué (café / IoT)
 
-Solution applicative **multi-pays** de suivi des lots de café vert et de **surveillance IoT** (température / humidité) des entrepôts, avec consolidation centrale au siège.
+Backend complet conçu pour s'adapter **à 100 %** au frontend React existant (`frontend/`),
+sans modifier sa logique (seule la configuration réseau a été ajoutée).
 
-> MSPR TPRE814 — *Conception d'une solution applicative en adéquation avec l'environnement technique étudié* (RNCP 35584, Bloc 4).
-
----
-
-## Sommaire
-
-- [Présentation](#présentation)
-- [Architecture](#architecture)
-- [Stack technique](#stack-technique)
-- [Structure du dépôt](#structure-du-dépôt)
-- [Prérequis](#prérequis)
-- [Démarrage rapide](#démarrage-rapide)
-- [Accès aux services](#accès-aux-services)
-- [Configuration](#configuration)
-- [Principaux endpoints API](#principaux-endpoints-api)
-- [Tests](#tests)
-- [État d'avancement & limitations connues](#état-davancement--limitations-connues)
-- [Documentation associée](#documentation-associée)
-
----
-
-## Présentation
-
-FutureKawa est une entreprise de caféiculture présente au **Brésil, en Équateur et en Colombie**. La solution permet de :
-
-- **centraliser le suivi des stocks** par pays et par entrepôt ;
-- **garantir la traçabilité** des lots depuis leur entrée en stockage (logique **FIFO**) ;
-- **surveiller automatiquement** les conditions de conservation via des capteurs IoT (MQTT) ;
-- **détecter et signaler** les situations à risque (dérive de conditions, lot > 365 jours) par **email** ;
-- préparer une **phase 2** d'automatisation des entrepôts (chauffage / humidification / aération).
-
-L'architecture est **distribuée** : chaque pays dispose d'un backend local conteneurisé (base SQL + broker MQTT + API REST) ; le **siège** dispose d'un backend central qui interroge les pays et alimente le **frontend web**.
-
-### Conditions idéales par pays
-
-| Pays | Température idéale | Humidité idéale | Tolérance |
-|------|:-----------------:|:---------------:|:---------:|
-| 🇧🇷 Brésil   | 29 °C | 55 % | ± 3 °C / ± 2 % |
-| 🇪🇨 Équateur | 31 °C | 60 % | ± 3 °C / ± 2 % |
-| 🇨🇴 Colombie | 26 °C | 80 % | ± 3 °C / ± 2 % |
-
----
+Plateforme de suivi des stocks de café : surveillance IoT température/humidité,
+alertes automatiques, tri FIFO, multi-pays (Brésil, Équateur, Colombie).
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    subgraph IoT["🌡️ Module IoT (entrepôt)"]
-        ESP["ESP32 + DHT22<br/>(MicroPython / Wokwi)"]
-    end
-
-    subgraph Pays["🇧🇷 Backend pays — Brésil"]
-        MQTT["Broker MQTT<br/>Mosquitto :1883"]
-        API1["API REST pays<br/>FastAPI :8000"]
-        DB[("PostgreSQL<br/>:5432")]
-        API1 --- DB
-    end
-
-    subgraph Siege["🏢 Siège"]
-        API2["API centrale<br/>FastAPI :8001"]
-        FRONT["Frontend Web<br/>React + Vite :8090"]
-    end
-
-    ESP -- "MQTT publish<br/>temp / humidité" --> MQTT
-    MQTT -- "souscription" --> API1
-    API2 -- "HTTP (consolidation)" --> API1
-    FRONT -- "HTTP" --> API2
+```
+                     ┌──────────────┐
+  Navigateur ──────► │   frontend   │  (nginx, build Vite)   :8082
+                     │  proxy /api ─┼──────────────┐
+                     └──────────────┘              ▼
+                                          ┌──────────────┐
+                                          │   central    │  (FastAPI, sans DB)  :8001
+                                          │  consolide   │
+                                          └──────┬───────┘
+                         ┌───────────────────────┼───────────────────────┐
+                         ▼                        ▼                       ▼
+                 ┌──────────────┐        ┌──────────────┐        ┌──────────────┐
+                 │ backend pays │        │ backend pays │        │ backend pays │
+                 │   brazil     │        │   ecuador    │        │   colombia   │  :8011/8012/8013
+                 └──────┬───────┘        └──────┬───────┘        └──────┬───────┘
+                        │ (une même image, paramétrée par COUNTRY)      │
+        ┌───────────────┴───────────────────────┴───────────────────────┘
+        ▼                                   ▲
+  ┌──────────┐   measurements (MQTT)   ┌──────────┐        ┌──────────────┐
+  │ postgres │◄──────────────────────  │mosquitto │◄────── │ iot-simulator│ (ESP32+DHT22 simulé)
+  │ 3 bases  │                         │  :1883   │        └──────────────┘
+  └──────────┘                         └────┬─────┘
+                                            │ (s'abonne aussi)
+                                       ┌────▼─────┐
+                                       │ node-red │  alerting parallèle → email/log   :1880
+                                       └──────────┘
 ```
 
-> Schéma détaillé, justification des choix et flux complets : voir **[DOSSIER_TECHNIQUE.docx](DOSSIER_TECHNIQUE.docx)** (§2).
+- **Backend pays** : une seule image (`backend/backend-country/`) lancée 3 fois, paramétrée par
+  `COUNTRY`. Chaque instance a **sa base** PostgreSQL et écoute le broker MQTT. Contient la
+  logique métier, le tri FIFO, les règles d'alerte, l'envoi d'email.
+- **Backend central** (`backend/backend-central/`) : **sans base**, interroge les 3 pays en HTTP
+  et consolide. C'est le **seul** service exposé au front. Toutes les routes sont préfixées `/api`.
+- **Init bases** (`backend/db/`) : crée les 3 bases PostgreSQL au premier démarrage.
+- **Simulateur IoT** (`iot-simulator/`) : publie temp/humidité en MQTT pour les 6 entrepôts.
+  Mode `normal` (dans les seuils) ou `anomalies` (dépassements → alertes).
+- **Node-RED** (`node-red/`) : alerting parallèle, indépendant du backend (voir plus bas).
+- **Front** (`frontend/`) : appelle `/api/...` en **same-origin** ; nginx (prod) / Vite (dev)
+  proxifient vers le central. Aucune modification de la logique JS.
 
----
-
-## Stack technique
-
-| Couche | Technologies |
-|--------|--------------|
-| **IoT** | ESP32, capteur DHT22, MicroPython, simulation Wokwi |
-| **Messagerie** | MQTT (broker Eclipse **Mosquitto**) |
-| **Backends** | **Python 3.11**, **FastAPI**, SQLAlchemy, Pydantic, httpx, paho-mqtt |
-| **Base de données** | **PostgreSQL 15** |
-| **Alerting** | Service email SMTP (mode démo console) + flux **Node-RED** |
-| **Frontend** | **React 19**, **Vite 8**, React Router 7, Tailwind CSS, graphiques SVG natifs |
-| **Conteneurisation** | **Docker** / **Docker Compose** |
-
----
-
-## Structure du dépôt
-
+### Organisation des dossiers
 ```
-.
-├── backend-brazil/        # Backend pays « exemple » (Brésil)
-│   ├── app/
-│   │   ├── main.py        # Routes API REST (FastAPI)
-│   │   ├── models.py      # Modèles SQLAlchemy (pays, entrepôt, lot, mesure, alerte)
-│   │   ├── crud.py        # Accès données
-│   │   ├── alerts.py      # Moteur d'alertes (conditions + âge des lots)
-│   │   ├── email_service.py  # Envoi des emails d'alerte (démo console si SMTP absent)
-│   │   ├── mqtt.py        # Souscripteur MQTT → persistance des mesures
-│   │   ├── seed.py        # Jeu de données de démonstration (idempotent)
-│   │   └── database.py    # Connexion PostgreSQL
-│   ├── mqtt_simulator.py  # Simulateur de capteur IoT (publie sur MQTT)
-│   └── Dockerfile
-├── backend-central/       # Backend central « siège » (consolidation multi-pays)
-│   └── app/
-│       ├── main.py        # Routes de consolidation + proxy vers les pays
-│       ├── country_client.py  # Client HTTP vers les backends pays
-│       └── config.py      # Registre des pays connectés
-├── frontend/              # Application web React/Vite (dashboard)
-├── ESP32/                 # Firmware & schéma Wokwi du module IoT
-├── main.py                # Code MicroPython embarqué (ESP32 + DHT22)
-├── Node-Red flows/        # Flux Node-RED d'alerting email
-├── mosquitto/             # Configuration du broker MQTT
-├── db/                    # Schéma SQL de référence
-├── docker-compose.yml     # Orchestration de l'ensemble
-├── README.md              # Ce fichier
-├── DOSSIER_TECHNIQUE.docx # Dossier technique (archi, IoT, plans de tests)
-└── DOCUMENTATION_UTILISATEUR.docx  # Guide d'utilisation métier
+g/
+├── backend/        backend-country/  ·  backend-central/  ·  db/
+├── iot-simulator/  (capteurs ESP32+DHT22 simulés)
+├── node-red/       (alerting MQTT → email/log)
+├── frontend/       (React + Vite, servi par nginx)
+├── mosquitto/      (broker MQTT — infra partagée)
+└── docker-compose.yml
 ```
 
----
-
-## Prérequis
-
-- **Docker** et **Docker Compose** (v2)
-- **Node.js ≥ 18** et **npm** (pour le frontend en mode développement)
-- **Python ≥ 3.11** (optionnel, pour lancer le simulateur IoT depuis l'hôte)
-
----
-
-## Démarrage rapide
-
-### 1. Lancer le stack backend + IoT (base, broker, API pays, API centrale)
+## Lancement (une commande)
 
 ```bash
-docker compose up -d postgres mosquitto brazil-api central-api
+cd g
+cp .env.example .env        # optionnel (valeurs par défaut OK, mode email démo console)
+docker compose up --build
 ```
 
-> ⚠️ Le service `frontend` du `docker-compose.yml` n'est **pas encore conteneurisé** (Dockerfile à fournir — voir [limitations](#état-davancement--limitations-connues)). On lance donc le front en mode développement (étape 2).
+| Service        | URL / port hôte                          |
+|----------------|------------------------------------------|
+| **Dashboard**  | **http://localhost:8082**                |
+| API centrale (Swagger) | http://localhost:8001/docs       |
+| Backend Brésil (Swagger)   | http://localhost:8011/docs   |
+| Backend Équateur (Swagger) | http://localhost:8012/docs   |
+| Backend Colombie (Swagger) | http://localhost:8013/docs   |
+| **Node-RED (alerting)** | **http://localhost:1880**           |
+| PostgreSQL     | localhost:5432 (user/pass `futurekawa`)  |
+| MQTT (Mosquitto) | localhost:1883                         |
 
-Au démarrage, le backend Brésil crée les tables et insère automatiquement un **jeu de données de démonstration** (1 pays, 1 exploitation, 1 entrepôt, 5 lots, 3 mesures).
+> Si le port 8082 est pris, changez `FRONTEND_ORIGIN` dans `.env` **et** le mapping de ports
+> du service `frontend` (les deux doivent correspondre, car l'URL est figée au build Vite).
 
-### 2. Lancer le frontend
+## Seuils par pays (idéal ± tolérance)
+
+| Pays | Température | Humidité |
+|------|-----------|----------|
+| Brésil 🇧🇷 | 29 °C ±3 (26–32) | 55 % ±2 (53–57) |
+| Équateur 🇪🇨 | 31 °C ±3 (28–34) | 60 % ±2 (58–62) |
+| Colombie 🇨🇴 | 26 °C ±3 (23–29) | 80 % ±2 (78–82) |
+
+## Règles métier
+
+- **FIFO** : lots triés par date de stockage (plus anciens d'abord).
+- **Alertes auto** : température/humidité hors seuil, lot > 365 j (périmé), lot proche
+  expiration (≥ 330 j). Types alignés sur le front : `temperature`, `humidity`, `lot_age`.
+- **Anti-duplication** : une seule alerte active par cause (`dedup_key`).
+- **Email** au responsable pays à chaque nouvelle alerte (**mode démo console** si SMTP non
+  configuré dans `.env`).
+- **Statuts de lot** : `conforme`, `alerte`, `perime`, `expedie` (recalculés selon les conditions).
+
+## Démo des alertes IoT
 
 ```bash
-cd frontend
-npm install
-npm run dev
+# Génère des dépassements de seuil en direct (nouvelles alertes temp/humidité)
+SIM_MODE=anomalies docker compose up -d --force-recreate iot-simulator
+# Retour au mode normal
+docker compose up -d --force-recreate iot-simulator
 ```
 
-Le dashboard est accessible sur **http://localhost:5173**.
+## Node-RED — alerting parallèle (indépendant du backend)
 
-### 3. (Optionnel) Simuler des relevés capteurs IoT
+Module d'alerting additionnel (cahier des charges), **séparé** du backend FastAPI et de son
+`email_service` (qui continue de fonctionner de son côté). Node-RED s'abonne au **même broker
+MQTT**, détecte les anomalies et envoie un email (ou logue en console si SMTP non configuré).
 
-Dans un terminal séparé, publier des mesures sur le broker MQTT :
+- **Interface** : http://localhost:1880 → onglet *« FutureKawa — Alerting »*.
+- **Flux** : `mqtt in` (`futurekawa/+/+/measurement`) → *Détection seuils* (par pays, lus depuis
+  le topic) → *Email ou log* → nœud **email** si `SMTP_HOST` est défini, sinon nœud **debug**
+  (repli console).
+- Seuils : Brésil 26–32 °C / 53–57 %, Équateur 28–34 / 58–62, Colombie 23–29 / 78–82.
+- Le flux est pré-chargé via l'image et persisté dans le volume `nodered_data` (les
+  modifications faites dans l'UI sont conservées). Pour repartir du flux d'origine après
+  l'avoir modifié : `docker volume rm futurekawa_nodered_data`.
+
+**Tester (voir une alerte partir) :**
+```bash
+# 1) Générer des dépassements de seuil
+SIM_MODE=anomalies docker compose up -d --force-recreate iot-simulator
+# 2) Observer les alertes Node-RED (mode repli console, SMTP non configuré)
+docker compose logs -f node-red        # lignes "email simulé: …Anomalie…"
+#    ou, dans l'UI http://localhost:1880, ouvrir le panneau "Debug" (à droite)
+# 3) Revenir au mode normal
+docker compose up -d --force-recreate iot-simulator
+```
+Avec un vrai SMTP (renseigner `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM`, `SMTP_TO` dans `.env`),
+le même message est envoyé par email au lieu d'être logué. *(Auth SMTP : si le serveur exige
+identifiants, saisissez-les dans le nœud email de l'UI puis « Deploy ».)*
+
+## Configuration email (optionnelle)
+
+Renseigner dans `.env` : `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`,
+`SMTP_USE_TLS`. Sans configuration, les emails s'affichent dans les logs (`docker compose logs backend-brazil`).
+
+## Développement front (hors Docker)
 
 ```bash
-cd backend-brazil
-pip install -r requirements.txt
-python mqtt_simulator.py            # données normales
-python mqtt_simulator.py --anomalies  # déclenche des alertes (valeurs hors seuil)
+docker compose up -d   # backends seuls
+cd frontend && npm install && npm run dev   # Vite :5173, proxy /api -> :8001
 ```
 
-Le backend persiste les mesures reçues et **lève automatiquement les alertes** (et envoie les emails — affichés en console en mode démo).
+## Données live & rafraîchissement automatique
 
-### Tout arrêter
+- Le **simulateur** publie de nouvelles mesures toutes les ~10 s (MQTT) ; chaque backend pays
+  les stocke et met à jour `currentTemp`/`currentHumidity` de l'entrepôt.
+- Le **front** rafraîchit automatiquement (polling 8 s) le Dashboard, la page Pays (jauges
+  temp/humidité) et le détail d'un lot (graphe capteurs) — **sans recharger la page**.
+
+## CRUD disponible
+
+| Entité | Créer | Supprimer | UI |
+|--------|-------|-----------|-----|
+| **Lot** | `POST /api/lots` | `DELETE /api/lots/{id}` | Page Pays (« + Lot » / 🗑) |
+| **Entrepôt** | `POST /api/warehouses` | `DELETE /api/warehouses/{id}` * | Page Pays (« + Entrepôt » / ✕) |
+| **Pays** | `POST /api/countries` ** | `DELETE /api/countries/{id}` | Dashboard (« Registre des pays ») |
+
+\* Suppression d'entrepôt refusée s'il contient des lots (message explicite).
+\** **Limite** : ajouter un pays n'écrit que dans le **registre du central** (routage). Ça
+n'instancie **pas** de backend/base/broker : l'`url` doit pointer vers un backend pays déjà
+déployé. La suppression retire le pays du routage (sa base reste intacte).
+
+## Vérifier que les données sont dynamiques (pas de mock)
 
 ```bash
-docker compose down          # arrête les conteneurs
-docker compose down -v       # + supprime les données PostgreSQL
+# 1) Les mesures changent dans le temps (lancer deux fois à ~10 s d'intervalle) :
+curl -s http://localhost:8001/api/sensors/current
+# 2) Données réelles via le proxy nginx du front :
+curl -s http://localhost:8082/api/lots
+# 3) Front : la base URL est bakée dans le bundle (jamais de mock) :
+curl -s http://localhost:8082/ | grep -o '/assets/index-[^"]*\.js'   # puis grep 8082 dans le .js
+# 4) CRUD de bout en bout : créer/supprimer un lot ou un entrepôt depuis la page Pays.
 ```
 
----
+## Contrat d'API (exposé par le central, préfixe `/api`)
 
-## Accès aux services
-
-| Service | URL | Description |
-|---------|-----|-------------|
-| Frontend (dev) | http://localhost:5173 | Dashboard web |
-| API pays (Brésil) | http://localhost:8000 | API REST locale + docs Swagger sur `/docs` |
-| API centrale (siège) | http://localhost:8001 | Consolidation multi-pays + `/docs` |
-| PostgreSQL | `localhost:5432` | base `futurkawa_db` (`postgres` / `password`) |
-| Mosquitto (MQTT) | `localhost:1883` | Broker MQTT |
-
-> 💡 La documentation interactive **Swagger** est disponible sur `/docs` de chaque API (générée automatiquement par FastAPI).
-
----
-
-## Configuration
-
-Les paramètres se définissent via variables d'environnement (voir `docker-compose.yml`).
-
-### Backend pays (`brazil-api`)
-
-| Variable | Défaut | Rôle |
-|----------|--------|------|
-| `DATABASE_URL` | `postgresql://postgres:password@postgres:5432/futurkawa_db` | Connexion PostgreSQL |
-| `MQTT_BROKER` | `mosquitto` | Hôte du broker MQTT |
-| `MQTT_TOPIC` | `futurekawa/brazil` | Topic souscrit pour les mesures |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | *(vide)* | Serveur d'envoi des emails. **Si vide → mode démo (console)** |
-| `ALERT_EMAIL_TO` | `responsable.brazil@futurekawa.com` | Destinataire des alertes |
-
-### Backend central (`central-api`)
-
-| Variable | Défaut | Rôle |
-|----------|--------|------|
-| `BRAZIL_API_URL` | `http://brazil-api:8000` | URL du backend pays Brésil |
-
-### Frontend
-
-| Variable | Rôle |
-|----------|------|
-| `VITE_API_BASE_URL` | URL de l'API centrale. **Non définie → l'app utilise des données de démonstration (mock).** |
-
----
-
-## Principaux endpoints API
-
-### Backend pays — `:8000`
-
-| Méthode | Route | Description |
-|---------|-------|-------------|
-| `GET` | `/lots` | Liste des lots |
-| `GET` | `/lots/fifo` | Lots triés FIFO (plus anciens d'abord) |
-| `POST` | `/lots` | Créer un lot |
-| `GET` | `/lots/{id}` | Détail d'un lot |
-| `POST` | `/lots/check-expiration` | Vérifier âge / expiration (lève alertes) |
-| `GET` | `/mesures` · `/mesures/latest` | Historique / dernière mesure |
-| `POST` | `/mesures` | Enregistrer une mesure (+ contrôle alertes) |
-| `GET` | `/alerts` · `/alerts/critical` | Alertes |
-| `GET` | `/kpis` | Indicateurs consolidés du pays |
-
-### Backend central — `:8001`
-
-| Méthode | Route | Description |
-|---------|-------|-------------|
-| `GET` | `/countries` | Pays connectés |
-| `GET` | `/countries/{c}/lots` · `/lots/fifo` · `/mesures` · `/alerts` · `/kpis` | Données d'un pays |
-| `GET` | `/countries/{c}/dashboard` | Tableau de bord d'un pays |
-| `GET` | `/dashboard` | **Consolidation tous pays** |
-| `GET` | `/lots` · `/lots/fifo` · `/alerts` · `/mesures` | Vues globales agrégées |
-
----
-
-## Tests
-
-La stratégie de test, la typologie et les cas détaillés sont décrits dans le **[dossier technique (DOSSIER_TECHNIQUE.docx)](DOSSIER_TECHNIQUE.docx)**, section « Plans de tests ».
-
-Exemple de test manuel reproductible (lots triés FIFO via l'API centrale) :
-
-```bash
-curl -s http://localhost:8001/countries/brazil/lots/fifo | python -m json.tool
-```
-
----
-
-## État d'avancement & limitations connues
-
-| Élément | État | Détail |
-|---------|:----:|--------|
-| Backend pays Brésil (API + DB + MQTT + alertes + email) | ✅ | Fonctionnel via Docker Compose |
-| Backend central (consolidation) | ✅ | Proxy + agrégation des pays |
-| Module IoT (ESP32/DHT22 + simulateur) | ✅ | Simulateur opérationnel ; capteur réel via Wokwi |
-| Frontend (UI complète) | ✅ | Fonctionne sur **données de démonstration (mock)** |
-| Conteneurisation du frontend | ⛔ | `Dockerfile` frontend à fournir (le service `frontend` du compose ne build pas en l'état) |
-| Branchement frontend ↔ API réelle | ⛔ | Routes/champs encore divergents ; couche d'adaptation à écrire |
-| IoT réel → persistance backend | ⚠️ | Le capteur publie sur `futurekawa_dht` (`temp`/`humidity`) ; le backend écoute `futurekawa/brazil` (`temperature`/`humidite`). À aligner — le simulateur, lui, alimente bien la base |
-| Multi-pays (≥ 3) | ⚠️ | Seul le Brésil est actif ; Équateur/Colombie prêts à activer dans `backend-central/app/config.py` |
-| CI/CD Jenkins | ⛔ | À ajouter (`Jenkinsfile`) |
-| Tests automatisés | ⛔ | Plan défini (dossier technique) ; implémentation à venir |
-
----
-
-## Documentation associée
-
-- 📐 **[DOSSIER_TECHNIQUE.docx](DOSSIER_TECHNIQUE.docx)** — architecture, conception IoT, plans de tests
-- 📖 **[DOCUMENTATION_UTILISATEUR.docx](DOCUMENTATION_UTILISATEUR.docx)** — guide d'utilisation pour les métiers
+Lots : `GET /api/lots`, `GET /api/countries/{c}/lots`, `GET /api/warehouses/{id}/lots`,
+`GET /api/lots/{id}`, `POST /api/lots`, `PATCH /api/lots/{id}/status`, `DELETE /api/lots/{id}` ·
+Capteurs : `GET /api/warehouses/{id}/sensors?limit=N`, `GET /api/countries/{c}/sensors/latest`,
+`GET /api/sensors/current` ·
+Alertes : `GET /api/alerts?country=&type=&status=`, `POST /api/alerts/{id}/resolve`,
+`GET /api/alerts/count` ·
+Entrepôts : `GET /api/warehouses`, `POST /api/warehouses`, `GET /api/countries/{c}/warehouses`,
+`GET /api/warehouses/{id}`, `DELETE /api/warehouses/{id}` ·
+Pays / consolidation : `GET /api/countries`, `POST /api/countries`, `DELETE /api/countries/{id}`,
+`GET /api/dashboard`, `GET /api/countries/{c}/kpis`, `GET /api/countries/{c}/fifo`.

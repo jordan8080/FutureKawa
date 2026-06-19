@@ -43,6 +43,23 @@ export function LotDetailPage() {
       .finally(() => setLoading(false))
   }, [lotId])
 
+  // Rafraîchissement live de l'entrepôt + historique capteurs
+  useEffect(() => {
+    if (!lot) return
+    const id = setInterval(() => {
+      Promise.all([
+        warehousesApi.getById(lot.warehouseId),
+        sensorsApi.getReadings(lot.warehouseId),
+      ])
+        .then(([warehouseData, readingsData]) => {
+          setWarehouse(warehouseData)
+          setReadings(readingsData)
+        })
+        .catch(() => {})
+    }, 8000)
+    return () => clearInterval(id)
+  }, [lot])
+
   if (loading) return <PageLoader />
 
   if (!lot) {

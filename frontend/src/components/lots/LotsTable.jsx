@@ -2,7 +2,7 @@ import { useNavigate } from 'react-router-dom'
 import { StatusBadge } from '../ui/Badge'
 import { formatDate, formatLotAge, getLotDays } from '../../utils/statusUtils'
 
-export function LotsTable({ lots, showCountry = false }) {
+export function LotsTable({ lots, showCountry = false, onDelete }) {
   const navigate = useNavigate()
 
   if (!lots?.length) {
@@ -62,7 +62,17 @@ export function LotsTable({ lots, showCountry = false }) {
                 </td>
                 <td className="px-4 py-3 text-gray-400 text-sm">{lot.weight?.toLocaleString('fr-FR')} kg</td>
                 <td className="px-4 py-3"><StatusBadge status={lot.status} /></td>
-                <td className="px-4 py-3 text-gray-600 group-hover:text-gray-400">›</td>
+                <td className="px-4 py-3 text-right">
+                  {onDelete ? (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); onDelete(lot.id) }}
+                      className="text-gray-600 hover:text-red-400 transition-colors"
+                      title="Supprimer le lot"
+                    >🗑</button>
+                  ) : (
+                    <span className="text-gray-600 group-hover:text-gray-400">›</span>
+                  )}
+                </td>
               </tr>
             )
           })}

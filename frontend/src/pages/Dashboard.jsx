@@ -5,6 +5,7 @@ import { Card } from '../components/ui/Card'
 import { StatusBadge } from '../components/ui/Badge'
 import { AlertItem } from '../components/alerts/AlertItem'
 import { PageLoader } from '../components/ui/LoadingSpinner'
+import { CountriesPanel } from '../components/admin/CountriesPanel'
 import { lotsApi, alertsApi, warehousesApi } from '../api'
 import { COUNTRIES_CONFIG } from '../data/mockData'
 import { getWarehouseStatus } from '../utils/statusUtils'
@@ -88,13 +89,21 @@ export function Dashboard() {
   const [warehouses, setWarehouses] = useState([])
 
   useEffect(() => {
-    Promise.all([lotsApi.getAll(), alertsApi.getActive(), warehousesApi.getAll()])
-      .then(([lotsData, alertsData, warehousesData]) => {
-        setLots(lotsData)
-        setAlerts(alertsData)
-        setWarehouses(warehousesData)
-      })
-      .finally(() => setLoading(false))
+    let active = true
+    const load = (initial) => {
+      Promise.all([lotsApi.getAll(), alertsApi.getActive(), warehousesApi.getAll()])
+        .then(([lotsData, alertsData, warehousesData]) => {
+          if (!active) return
+          setLots(lotsData)
+          setAlerts(alertsData)
+          setWarehouses(warehousesData)
+        })
+        .catch(() => {})
+        .finally(() => { if (initial && active) setLoading(false) })
+    }
+    load(true)
+    const id = setInterval(() => load(false), 8000) // rafraîchissement live
+    return () => { active = false; clearInterval(id) }
   }, [])
 
   if (loading) return <PageLoader />
@@ -178,6 +187,9 @@ export function Dashboard() {
           </div>
         )}
       </div>
+
+      {/* Administration des pays (registre central) */}
+      <CountriesPanel />
     </div>
   )
 }
