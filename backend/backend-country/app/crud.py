@@ -253,9 +253,9 @@ def create_alert(db: Session, *, type, severity, warehouse, lot_id, message, ded
 def kpis(db: Session):
     lots = get_lots(db)
     total = len(lots)
-    conforme = sum(1 for l in lots if l.status == "conforme")
-    perime = sum(1 for l in lots if l.status == "perime")
-    alerte = sum(1 for l in lots if l.status == "alerte")
+    conforme = sum(1 for lot in lots if lot.status == "conforme")
+    perime = sum(1 for lot in lots if lot.status == "perime")
+    alerte = sum(1 for lot in lots if lot.status == "alerte")
     active_alerts = db.query(func.count(models.Alert.id)).filter(
         models.Alert.status == "active").scalar()
     return {
@@ -272,5 +272,5 @@ def kpis(db: Session):
 
 def fifo(db: Session, limit: int = 10):
     """Lots à expédier en priorité (les plus anciens), hors expédiés."""
-    lots = [l for l in get_lots(db) if l.status != "expedie"]
+    lots = [lot for lot in get_lots(db) if lot.status != "expedie"]
     return lots[:limit]

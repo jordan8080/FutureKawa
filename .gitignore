@@ -12,6 +12,11 @@ __pycache__/
 venv/
 env/
 
+# Tests / qualité (artefacts générés)
+reports/
+.pytest_cache/
+.ruff_cache/
+
 # Node / Frontend
 node_modules/
 dist/

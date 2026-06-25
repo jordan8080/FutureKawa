@@ -1,0 +1,18 @@
+# Image de test du backend pays (utilisée par le stage "Test" de Jenkins).
+# Le code + les tests sont embarqués : pas de montage de volume (robuste quand
+# Jenkins tourne lui-même dans Docker). Le rapport JUnit est récupéré ensuite
+# via `docker cp <conteneur>:/app/reports/junit.xml`.
+FROM python:3.12-slim
+
+WORKDIR /app
+ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
+
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
+
+# app/, tests/, conftest.py, pytest.ini, ruff.toml
+COPY . .
+
+# Génère le rapport JUnit consommé par Jenkins. -p no:cacheprovider évite
+# d'écrire un .pytest_cache dans un conteneur éphémère.
+CMD ["python", "-m", "pytest", "--junitxml=reports/junit.xml", "-p", "no:cacheprovider"]

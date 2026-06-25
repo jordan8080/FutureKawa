@@ -130,7 +130,7 @@ services:
     environment:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883
-      SIM_MODE: ${SIM_MODE:-normal}
+      SIM_MODE: ${SIM_MODE:-anomalies}
       SIM_INTERVAL: ${SIM_INTERVAL:-10}
     depends_on:
       mosquitto: { condition: service_started }

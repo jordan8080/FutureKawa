@@ -1,0 +1,14 @@
+# Configuration du linter Python (stage "Qualité" de la pipeline Jenkins).
+# Lancement local : ruff check .
+line-length = 100
+target-version = "py312"
+
+[lint]
+# Équivalent flake8 : E/W = style PEP8 (pycodestyle),
+# F = erreurs réelles (pyflakes : imports inutilisés, variables non définies…).
+select = ["E", "W", "F"]
+
+[lint.per-file-ignores]
+# Les tests peuvent importer les helpers du conftest après les constantes, etc.
+"tests/*" = ["E402"]
+"conftest.py" = ["E402"]
